@@ -1,0 +1,29 @@
+
+CREATE TABLE public.watchlist (
+  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  coin_id TEXT NOT NULL,
+  coin_symbol TEXT NOT NULL,
+  coin_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, coin_id)
+);
+
+ALTER TABLE public.watchlist ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own watchlist"
+  ON public.watchlist FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can add to their own watchlist"
+  ON public.watchlist FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can remove from their own watchlist"
+  ON public.watchlist FOR DELETE
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE INDEX idx_watchlist_user_id ON public.watchlist(user_id);
