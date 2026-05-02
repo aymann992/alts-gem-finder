@@ -41,7 +41,7 @@ export async function searchCoins(q: string): Promise<CoinSearchResult[]> {
   return (data.coins ?? []).slice(0, 12);
 }
 
-export async function fetchCoinDetail(id: string) {
+export async function fetchCoinDetail(id: string): Promise<any> {
   return await cgDetail({ data: { id } });
 }
 
