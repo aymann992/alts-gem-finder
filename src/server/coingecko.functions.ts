@@ -6,7 +6,7 @@ const BASE = "https://api.coingecko.com/api/v3";
 // isolate — enough to smooth out bursty traffic and dodge 429s.
 const cache = new Map<string, { at: number; data: unknown }>();
 
-async function cachedFetch(path: string, ttlMs: number): Promise<unknown> {
+async function cachedFetch(path: string, ttlMs: number): Promise<any> {
   const key = path;
   const hit = cache.get(key);
   const now = Date.now();
