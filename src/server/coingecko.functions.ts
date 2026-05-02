@@ -142,6 +142,18 @@ export const cgNews = createServerFn({ method: "GET" }).handler(async () => {
       published: new Date(u.created_at).toISOString(),
     }));
   } catch {
-    return [];
+    /* fall through to static fallback */
   }
+
+  // Last-resort static fallback: curated source list so the UI never shows
+  // an empty page. These are stable landing pages, not dated headlines.
+  const now = new Date().toISOString();
+  return [
+    { title: "Latest crypto headlines on CoinDesk", url: "https://www.coindesk.com/", source: "CoinDesk", published: now },
+    { title: "Markets & breaking news on Cointelegraph", url: "https://cointelegraph.com/", source: "Cointelegraph", published: now },
+    { title: "The Block — research-driven crypto news", url: "https://www.theblock.co/", source: "The Block", published: now },
+    { title: "Decrypt — daily crypto news & analysis", url: "https://decrypt.co/", source: "Decrypt", published: now },
+    { title: "Bitcoin Magazine — BTC-focused coverage", url: "https://bitcoinmagazine.com/", source: "Bitcoin Magazine", published: now },
+    { title: "CryptoSlate — news, prices & rankings", url: "https://cryptoslate.com/", source: "CryptoSlate", published: now },
+  ];
 });
