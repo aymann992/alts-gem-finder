@@ -1,5 +1,6 @@
-// CoinGecko free public API — no key required.
-const BASE = "https://api.coingecko.com/api/v3";
+// Client wrappers around server functions that proxy CoinGecko.
+// Server-side caching dodges browser-origin 429 rate limits.
+import { cgMarkets, cgSearch, cgDetail, cgHistory, cgNews } from "@/server/coingecko.functions";
 
 export interface MarketCoin {
   id: string;
@@ -23,18 +24,7 @@ export async function fetchMarkets(params: {
   perPage?: number;
   ids?: string[];
 } = {}): Promise<MarketCoin[]> {
-  const { vs = "usd", page = 1, perPage = 50, ids } = params;
-  const url = new URL(`${BASE}/coins/markets`);
-  url.searchParams.set("vs_currency", vs);
-  url.searchParams.set("order", "market_cap_desc");
-  url.searchParams.set("per_page", String(perPage));
-  url.searchParams.set("page", String(page));
-  url.searchParams.set("sparkline", "true");
-  url.searchParams.set("price_change_percentage", "1h,24h,7d,30d");
-  if (ids && ids.length) url.searchParams.set("ids", ids.join(","));
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`CoinGecko markets failed: ${res.status}`);
-  return res.json();
+  return (await cgMarkets({ data: params })) as MarketCoin[];
 }
 
 export interface CoinSearchResult {
@@ -47,27 +37,16 @@ export interface CoinSearchResult {
 
 export async function searchCoins(q: string): Promise<CoinSearchResult[]> {
   if (!q.trim()) return [];
-  const res = await fetch(`${BASE}/search?query=${encodeURIComponent(q)}`);
-  if (!res.ok) throw new Error(`Search failed: ${res.status}`);
-  const data = await res.json();
+  const data = (await cgSearch({ data: { q } })) as { coins?: CoinSearchResult[] };
   return (data.coins ?? []).slice(0, 12);
 }
 
-export async function fetchCoinDetail(id: string) {
-  const res = await fetch(
-    `${BASE}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=true`,
-  );
-  if (!res.ok) throw new Error(`Coin detail failed: ${res.status}`);
-  return res.json();
+export async function fetchCoinDetail(id: string): Promise<any> {
+  return await cgDetail({ data: { id } });
 }
 
 export async function fetchCoinHistory(id: string, days = 30, vs = "usd") {
-  const res = await fetch(
-    `${BASE}/coins/${id}/market_chart?vs_currency=${vs}&days=${days}`,
-  );
-  if (!res.ok) throw new Error(`History failed: ${res.status}`);
-  const data = await res.json();
-  // data.prices: [ [ms, price], ... ]
+  const data = (await cgHistory({ data: { id, days, vs } })) as { prices: [number, number][] };
   return (data.prices as [number, number][]).map(([t, p]) => ({
     t,
     date: new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
@@ -83,36 +62,15 @@ export interface NewsItem {
 }
 
 export async function fetchCryptoNews(): Promise<NewsItem[]> {
-  // CoinGecko status updates as a free news-ish feed
-  try {
-    const res = await fetch(`${BASE}/news`);
-    if (res.ok) {
-      const data = await res.json();
-      const items = (data.data ?? []) as Array<{
-        title: string;
-        url: string;
-        news_site: string;
-        updated_at: number;
-      }>;
-      return items.slice(0, 20).map((n) => ({
-        title: n.title,
-        url: n.url,
-        source: n.news_site,
-        published: new Date(n.updated_at * 1000).toLocaleString(),
-      }));
-    }
-  } catch {
-    /* fall through */
-  }
-  // Fallback: status updates
-  const res = await fetch(`${BASE}/status_updates?per_page=20`);
-  if (!res.ok) throw new Error(`News failed: ${res.status}`);
-  const data = await res.json();
-  return (data.status_updates ?? []).map((u: any) => ({
-    title: u.description?.slice(0, 140) ?? "Update",
-    url: u.project?.public_notice ?? `https://www.coingecko.com/en/coins/${u.project?.id ?? ""}`,
-    source: u.project?.name ?? "CoinGecko",
-    published: new Date(u.created_at).toLocaleString(),
+  const items = (await cgNews()) as Array<{
+    title: string;
+    url: string;
+    source: string;
+    published: string;
+  }>;
+  return items.map((n) => ({
+    ...n,
+    published: new Date(n.published).toLocaleString(),
   }));
 }
 
