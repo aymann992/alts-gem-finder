@@ -4,7 +4,13 @@ const BASE = "https://api.coingecko.com/api/v3";
 
 // Module-scoped cache. In a Worker this lives for the duration of the
 // isolate — enough to smooth out bursty traffic and dodge 429s.
-const cache = new Map<string, { at: number; data: unknown }>();
+// We serve "fresh" within ttlMs, and "stale" indefinitely on errors so the
+// UI always has something to show after the first successful fetch.
+const cache = new Map<string, { at: number; data: any }>();
+
+// In-flight dedupe: collapse concurrent requests for the same path so a burst
+// of users doesn't trigger N parallel CoinGecko calls.
+const inflight = new Map<string, Promise<any>>();
 
 async function cachedFetch(path: string, ttlMs: number): Promise<any> {
   const key = path;
@@ -12,20 +18,34 @@ async function cachedFetch(path: string, ttlMs: number): Promise<any> {
   const now = Date.now();
   if (hit && now - hit.at < ttlMs) return hit.data;
 
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { accept: "application/json", "user-agent": "AltPulse/1.0" },
-  });
+  const existing = inflight.get(key);
+  if (existing) return existing;
 
-  if (res.status === 429 && hit) {
-    // Return stale rather than failing.
-    return hit.data;
-  }
-  if (!res.ok) {
-    throw new Error(`CoinGecko ${path} failed: ${res.status}`);
-  }
-  const data = await res.json();
-  cache.set(key, { at: now, data });
-  return data;
+  const job = (async () => {
+    try {
+      const res = await fetch(`${BASE}${path}`, {
+        headers: { accept: "application/json", "user-agent": "AltPulse/1.0" },
+      });
+
+      if (!res.ok) {
+        // Any non-OK (429, 5xx, 422, etc.): prefer stale data over failing.
+        if (hit) return hit.data;
+        throw new Error(`CoinGecko ${path} failed: ${res.status}`);
+      }
+      const data = await res.json();
+      cache.set(key, { at: now, data });
+      return data;
+    } catch (err) {
+      // Network/parse error: serve stale if we have it.
+      if (hit) return hit.data;
+      throw err;
+    } finally {
+      inflight.delete(key);
+    }
+  })();
+
+  inflight.set(key, job);
+  return job;
 }
 
 export const cgMarkets = createServerFn({ method: "GET" })
