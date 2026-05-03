@@ -138,24 +138,86 @@ async function extCachedFetch(url: string, ttlMs: number): Promise<any> {
   return job;
 }
 
-export const cgNews = createServerFn({ method: "GET" }).handler(async () => {
-  // Primary: CryptoCompare's free news API (no key required).
-  try {
-    const data = (await extCachedFetch(
-      `https://min-api.cryptocompare.com/data/v2/news/?lang=EN`,
-      5 * 60_000,
-    )) as {
-      Data?: Array<{ title: string; url: string; source: string; source_info?: { name?: string }; published_on: number }>;
-    };
-    const items = data.Data ?? [];
-    if (items.length) {
-      return items.slice(0, 30).map((n) => ({
-        title: n.title,
-        url: n.url,
-        source: n.source_info?.name ?? n.source ?? "CryptoCompare",
-        published: new Date(n.published_on * 1000).toISOString(),
-      }));
+async function extCachedFetchText(url: string, ttlMs: number): Promise<string> {
+  const key = `TEXT:${url}`;
+  const hit = extCache.get(key);
+  const now = Date.now();
+  if (hit && now - hit.at < ttlMs) return hit.data as string;
+  const existing = extInflight.get(key);
+  if (existing) return existing as Promise<string>;
+  const job = (async () => {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          accept: "application/rss+xml, application/xml, text/xml, */*",
+          "user-agent": "Mozilla/5.0 (compatible; AltPulse/1.0)",
+        },
+      });
+      if (!res.ok) {
+        if (hit) return hit.data as string;
+        throw new Error(`${url} failed: ${res.status}`);
+      }
+      const text = await res.text();
+      extCache.set(key, { at: now, data: text });
+      return text;
+    } catch (err) {
+      if (hit) return hit.data as string;
+      throw err;
+    } finally {
+      extInflight.delete(key);
     }
+  })();
+  extInflight.set(key, job);
+  return job;
+}
+
+// Tiny RSS fetcher — extracts headlines from public crypto feeds (no API key).
+async function fetchRss(url: string, source: string, ttlMs: number) {
+  const xml = (await extCachedFetchText(url, ttlMs)) as string;
+  const items: Array<{ title: string; url: string; source: string; published: string }> = [];
+  const itemRegex = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
+  const pick = (block: string, tag: string) => {
+    const m = block.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+    if (!m) return "";
+    return m[1]
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+      .replace(/<[^>]+>/g, "")
+      .trim();
+  };
+  let m: RegExpExecArray | null;
+  while ((m = itemRegex.exec(xml))) {
+    const block = m[1];
+    const title = pick(block, "title");
+    const link = pick(block, "link");
+    const pub = pick(block, "pubDate") || pick(block, "dc:date") || new Date().toUTCString();
+    if (title && link) {
+      items.push({ title, url: link, source, published: new Date(pub).toISOString() });
+    }
+    if (items.length >= 15) break;
+  }
+  return items;
+}
+
+const FEEDS: Array<{ url: string; source: string }> = [
+  { url: "https://www.coindesk.com/arc/outboundfeeds/rss/", source: "CoinDesk" },
+  { url: "https://cointelegraph.com/rss", source: "Cointelegraph" },
+  { url: "https://decrypt.co/feed", source: "Decrypt" },
+  { url: "https://cryptoslate.com/feed/", source: "CryptoSlate" },
+];
+
+export const cgNews = createServerFn({ method: "GET" }).handler(async () => {
+  // Primary: aggregate public RSS feeds. Each feed is independently cached so
+  // a single slow/failing source can't block the others.
+  try {
+    const results = await Promise.allSettled(
+      FEEDS.map((f) => fetchRss(f.url, f.source, 5 * 60_000)),
+    );
+    const merged = results
+      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof fetchRss>>> => r.status === "fulfilled")
+      .flatMap((r) => r.value)
+      .sort((a, b) => +new Date(b.published) - +new Date(a.published))
+      .slice(0, 40);
+    if (merged.length) return merged;
   } catch {
     /* fall through */
   }
