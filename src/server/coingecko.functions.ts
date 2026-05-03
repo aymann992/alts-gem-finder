@@ -107,19 +107,53 @@ export const cgHistory = createServerFn({ method: "GET" })
     );
   });
 
+// Separate cache for non-CoinGecko sources.
+const extCache = new Map<string, { at: number; data: any }>();
+const extInflight = new Map<string, Promise<any>>();
+
+async function extCachedFetch(url: string, ttlMs: number): Promise<any> {
+  const hit = extCache.get(url);
+  const now = Date.now();
+  if (hit && now - hit.at < ttlMs) return hit.data;
+  const existing = extInflight.get(url);
+  if (existing) return existing;
+  const job = (async () => {
+    try {
+      const res = await fetch(url, { headers: { accept: "application/json", "user-agent": "AltPulse/1.0" } });
+      if (!res.ok) {
+        if (hit) return hit.data;
+        throw new Error(`${url} failed: ${res.status}`);
+      }
+      const data = await res.json();
+      extCache.set(url, { at: now, data });
+      return data;
+    } catch (err) {
+      if (hit) return hit.data;
+      throw err;
+    } finally {
+      extInflight.delete(url);
+    }
+  })();
+  extInflight.set(url, job);
+  return job;
+}
+
 export const cgNews = createServerFn({ method: "GET" }).handler(async () => {
-  // Try the news endpoint (requires page=1), fall back to status_updates.
+  // Primary: CryptoCompare's free news API (no key required).
   try {
-    const data = (await cachedFetch(`/news?page=1`, 5 * 60_000)) as {
-      data?: Array<{ title: string; url: string; news_site: string; updated_at: number }>;
+    const data = (await extCachedFetch(
+      `https://min-api.cryptocompare.com/data/v2/news/?lang=EN`,
+      5 * 60_000,
+    )) as {
+      Data?: Array<{ title: string; url: string; source: string; source_info?: { name?: string }; published_on: number }>;
     };
-    const items = data.data ?? [];
+    const items = data.Data ?? [];
     if (items.length) {
       return items.slice(0, 30).map((n) => ({
         title: n.title,
         url: n.url,
-        source: n.news_site,
-        published: new Date(n.updated_at * 1000).toISOString(),
+        source: n.source_info?.name ?? n.source ?? "CryptoCompare",
+        published: new Date(n.published_on * 1000).toISOString(),
       }));
     }
   } catch {
