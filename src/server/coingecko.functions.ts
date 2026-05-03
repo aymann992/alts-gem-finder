@@ -138,6 +138,39 @@ async function extCachedFetch(url: string, ttlMs: number): Promise<any> {
   return job;
 }
 
+async function extCachedFetchText(url: string, ttlMs: number): Promise<string> {
+  const key = `TEXT:${url}`;
+  const hit = extCache.get(key);
+  const now = Date.now();
+  if (hit && now - hit.at < ttlMs) return hit.data as string;
+  const existing = extInflight.get(key);
+  if (existing) return existing as Promise<string>;
+  const job = (async () => {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          accept: "application/rss+xml, application/xml, text/xml, */*",
+          "user-agent": "Mozilla/5.0 (compatible; AltPulse/1.0)",
+        },
+      });
+      if (!res.ok) {
+        if (hit) return hit.data as string;
+        throw new Error(`${url} failed: ${res.status}`);
+      }
+      const text = await res.text();
+      extCache.set(key, { at: now, data: text });
+      return text;
+    } catch (err) {
+      if (hit) return hit.data as string;
+      throw err;
+    } finally {
+      extInflight.delete(key);
+    }
+  })();
+  extInflight.set(key, job);
+  return job;
+}
+
 // Tiny RSS fetcher — extracts headlines from public crypto feeds (no API key).
 async function fetchRss(url: string, source: string, ttlMs: number) {
   const xml = (await extCachedFetchText(url, ttlMs)) as string;
