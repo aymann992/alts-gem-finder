@@ -1,6 +1,6 @@
 // Client wrappers around server functions that proxy CoinGecko.
 // Server-side caching dodges browser-origin 429 rate limits.
-import { cgMarkets, cgSearch, cgDetail, cgHistory, cgNews } from "@/server/coingecko.functions";
+import { cgMarkets, cgSearch, cgDetail, cgHistory, cgNews } from "@/lib/coingecko.functions";
 
 export interface MarketCoin {
   id: string;
