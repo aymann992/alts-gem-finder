@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Sparkline } from "@/components/Sparkline";
 import { ArrowRight, Star, LineChart, Activity, ShieldAlert, Sparkles } from "lucide-react";
+import { GlobalStatsCard, FearGreedCard, TrendingCard, MoversCard } from "@/components/MarketWidgets";
 import heroImg from "@/assets/hero-crypto.jpg";
 
 export const Route = createFileRoute("/")({
@@ -74,6 +75,22 @@ function Home() {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* Market pulse */}
+      <section className="container mx-auto px-4 pt-12">
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold">Market pulse</h2>
+          <p className="text-sm text-muted-foreground">Sentiment, dominance and what's trending right now.</p>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <GlobalStatsCard />
+          <FearGreedCard />
+          <TrendingCard />
+        </div>
+        <div className="mt-4">
+          <MoversCard />
         </div>
       </section>
 

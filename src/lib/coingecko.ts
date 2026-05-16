@@ -154,6 +154,102 @@ export async function fetchCryptoNews(): Promise<NewsItem[]> {
   return items.map((n) => ({ ...n, published: new Date(n.published).toLocaleString() }));
 }
 
+// ---------- Extra market data ----------
+
+export interface GlobalStats {
+  totalMarketCapUsd: number;
+  totalVolumeUsd: number;
+  btcDominance: number;
+  ethDominance: number;
+  marketCapChange24h: number;
+  activeCryptos: number;
+  markets: number;
+}
+
+export async function fetchGlobal(): Promise<GlobalStats> {
+  const data = (await cachedFetch(`/global`, 5 * 60_000)) as {
+    data: {
+      total_market_cap: Record<string, number>;
+      total_volume: Record<string, number>;
+      market_cap_percentage: Record<string, number>;
+      market_cap_change_percentage_24h_usd: number;
+      active_cryptocurrencies: number;
+      markets: number;
+    };
+  };
+  const d = data.data;
+  return {
+    totalMarketCapUsd: d.total_market_cap.usd,
+    totalVolumeUsd: d.total_volume.usd,
+    btcDominance: d.market_cap_percentage.btc,
+    ethDominance: d.market_cap_percentage.eth,
+    marketCapChange24h: d.market_cap_change_percentage_24h_usd,
+    activeCryptos: d.active_cryptocurrencies,
+    markets: d.markets,
+  };
+}
+
+export interface TrendingCoin {
+  id: string;
+  name: string;
+  symbol: string;
+  thumb: string;
+  market_cap_rank: number | null;
+  price_btc: number;
+}
+
+export async function fetchTrending(): Promise<TrendingCoin[]> {
+  const data = (await cachedFetch(`/search/trending`, 5 * 60_000)) as {
+    coins?: Array<{ item: { id: string; name: string; symbol: string; thumb: string; market_cap_rank: number | null; price_btc: number } }>;
+  };
+  return (data.coins ?? []).map((c) => c.item).slice(0, 7);
+}
+
+export interface FearGreed {
+  value: number;
+  classification: string;
+  timestamp: string;
+}
+
+// Fear & Greed Index from alternative.me (CORS-enabled, free, no key).
+export async function fetchFearGreed(): Promise<FearGreed | null> {
+  const key = "fng";
+  const hit = cache.get(key);
+  const now = Date.now();
+  if (hit && now - hit.at < 30 * 60_000) return hit.data;
+  try {
+    const res = await fetch("https://api.alternative.me/fng/?limit=1");
+    if (!res.ok) return hit?.data ?? null;
+    const json = (await res.json()) as { data: Array<{ value: string; value_classification: string; timestamp: string }> };
+    const d = json.data?.[0];
+    if (!d) return hit?.data ?? null;
+    const out: FearGreed = {
+      value: Number(d.value),
+      classification: d.value_classification,
+      timestamp: new Date(Number(d.timestamp) * 1000).toISOString(),
+    };
+    cache.set(key, { at: now, data: out });
+    return out;
+  } catch {
+    return hit?.data ?? null;
+  }
+}
+
+export async function fetchTopMovers(): Promise<{ gainers: MarketCoin[]; losers: MarketCoin[] }> {
+  // Pull top 250 by mcap and sort by 24h change.
+  const coins = await fetchMarkets({ perPage: 250, page: 1 });
+  const sorted = [...coins].filter((c) => typeof c.price_change_percentage_24h_in_currency === "number");
+  sorted.sort(
+    (a, b) =>
+      (b.price_change_percentage_24h_in_currency ?? 0) -
+      (a.price_change_percentage_24h_in_currency ?? 0),
+  );
+  return {
+    gainers: sorted.slice(0, 5),
+    losers: sorted.slice(-5).reverse(),
+  };
+}
+
 export function formatPrice(n: number | null | undefined): string {
   if (n == null || isNaN(n)) return "—";
   if (n >= 1) return n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
