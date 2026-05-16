@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Sparkline } from "@/components/Sparkline";
 import { ArrowRight, Star, LineChart, Activity, ShieldAlert, Sparkles } from "lucide-react";
+import { GlobalStatsCard, FearGreedCard, TrendingCard, MoversCard } from "@/components/MarketWidgets";
 import heroImg from "@/assets/hero-crypto.jpg";
 
 export const Route = createFileRoute("/")({
